@@ -1,0 +1,173 @@
+---
+title: "Analysis of NOAA Storm Database"
+output: html_document
+---
+
+# Synopsis
+
+This assignment analyzes the US NOAA Storm Database to address the following two questions:
+
+1. Across the United States, which types of events are most harmful with respect to population health?
+
+2. Across the United States, which types of events have the greatest economic consequences?
+
+### Environment
+- Windows 8.1 64 bit
+- R v3.1.1
+- Rstudio v0.98.1062.0
+
+
+# Data Processing
+
+```{r message=FALSE}
+library(stringr)
+library(plyr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+```
+
+```{r cache=TRUE}
+fileurl <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+fileurl <- sub("^https", "http", fileurl)
+
+filename <- "StormData.csv.bz2"
+if (!file.exists(filename)) {download.file(fileurl, filename)}
+
+stormdata <- read.csv(bzfile(filename), stringsAsFactors=FALSE)
+dim(stormdata)
+```
+
+```{r }
+stormdf <- tbl_df(stormdata) %>%
+    filter(FATALITIES > 0 | INJURIES > 0 | PROPDMG > 0 | CROPDMG > 0) %>%
+    mutate(YEAR = as.integer(str_extract(BGN_DATE, "\\d{4}"))) %>%
+    filter(YEAR >= 1996) %>%
+    select(EVTYPE, FATALITIES, INJURIES, PROPDMG, PROPDMGEXP, CROPDMG, CROPDMGEXP)
+
+length(unique(stormdf$EVTYPE))
+```
+
+```{r }
+clean_evtype <- function(x) {
+    x <- toupper(str_trim(x))
+    
+    if (grepl("ACCIDENT|DROWNING", x)) "OTHER"
+    else if (grepl("HIGH TIDE", x)) "COASTAL FLOOD"
+    else if (grepl("COASTAL ?STORM", x)) "STORM SURGE/TIDE"
+    else if (grepl("COASTAL|CSTL|BEACH", x)) "COASTAL FLOOD"
+    else if (grepl("EXTREME", x)) "EXTREME COLD/WIND CHILL"
+    else if (grepl("COLD", x)) "COLD/WIND CHILL"
+    else if (grepl("FREEZING", x)) "FREEZING FOG"
+    else if (grepl("FOG", x)) "DENSE FOG"
+    else if (grepl("BLOWING DUST", x)) "DUST STORM"
+    else if (grepl("^HEAT$", x)) "HEAT"
+    else if (grepl("HEAT", x)) "EXCESSIVE HEAT"
+    else if (grepl("THERMIA|WARM", x)) "HEAT"
+    else if (grepl("FLASH|DAM BREAK|HIGH WATER", x)) "FLASH FLOOD"
+    else if (grepl("LAKESHORE FLOOD", x)) "LAKESHORE FLOOD"
+    else if (grepl("FLOOD|FLD", x)) "FLOOD"
+    else if (grepl("MARINE T[^ ]*M\\b", x)) "MARINE THUNDERSTORM WIND"
+    else if (grepl("MARINE", x)) x
+    else if (grepl("ICE STORM", x)) "ICE STORM"
+    else if (grepl("FROST|FREEZE|ICE|ICY", x)) "FROST/FREEZE"
+    else if (grepl("LAKE.*SNOW", x)) "LAKE-EFFECT SNOW"
+    else if (grepl("SNOW", x)) "HEAVY SNOW"
+    else if (grepl("RAIN", x)) "HEAVY RAIN"
+    else if (grepl("HAIL", x)) "HAIL"
+    else if (grepl("SURF", x)) "HIGH SURF"
+    else if (grepl("WINTER STORM", x)) "WINTER STORM"
+    else if (grepl("WINTER|WINTRY|GLAZE|PRECIP", x)) "WINTER WEATHER"
+    else if (grepl("SLIDE|SLUMP", x)) "DEBRIS FLOW"
+    else if (grepl("RIVER", x)) "FLOOD"
+    else if (grepl("GUSTY", x)) "STRONG WIND"
+    else if (grepl("NON.?TSTM", x)) "OTHER"
+    else if (grepl("THUNDERSTORM|TSTM|BURST", x)) "THUNDERSTORM WIND"
+    else if (grepl("STRONG WIND", x)) "STRONG WIND"
+    else if (grepl("WIND", x)) "HIGH WIND"
+    else if (grepl("HURRICANE|TYPHOON", x)) "HURRICANE(TYPHOON)"
+    else if (grepl("RIP", x)) "RIP CURRENT"
+    else if (grepl("TORNADO|LANDSPOUT", x)) "TORNADO"
+    else if (grepl("TROPICAL", x)) x
+    else if (grepl("STORM|TIDE", x)) "STORM SURGE/TIDE"
+    else if (grepl("FIRE", x)) "WILDFIRE"
+    else if (grepl("WAVE|SWELL| SEAS$", x)) "HIGH SURF"
+    else x
+}
+```
+
+```{r }
+stormdf$EVTYPE <- sapply(stormdf$EVTYPE, clean_evtype)
+
+length(unique(stormdf$EVTYPE))
+```
+
+```{r }
+symbol2value <- function(x) {
+    if (x == "K") 1e3
+    else if (x == "M") 1e6
+    else if (x == "B") 1e9
+    else 1
+}
+```
+
+```{r }
+stormdf$PROPDMG <- stormdf$PROPDMG * sapply(stormdf$PROPDMGEXP, symbol2value)
+stormdf$CROPDMG <- stormdf$CROPDMG * sapply(stormdf$CROPDMGEXP, symbol2value)
+
+stormdf <- stormdf %>%
+    select(-PROPDMGEXP, -CROPDMGEXP) %>%
+    group_by(EVTYPE) %>%
+    summarize(FATALITIES = sum(FATALITIES), INJURIES = sum(INJURIES), 
+              PROPDMG = sum(PROPDMG), CROPDMG = sum(CROPDMG)) %>%
+    mutate(TOTHEALTHDMG = FATALITIES + INJURIES, TOTECONOMICDMG = PROPDMG + CROPDMG)
+```
+
+
+# Results
+
+### Types of events that are most harmful with respect to population health:
+```{r }
+top_health_dmg <- stormdf %>%
+    select(-c(PROPDMG, CROPDMG, TOTECONOMICDMG)) %>%
+    filter(FATALITIES >= 275 | INJURIES >= 875) %>%
+    arrange(desc(FATALITIES), desc(TOTHEALTHDMG))
+
+top_health_dmg
+
+fatalities <- select(top_health_dmg, EVTYPE, FATALITIES)
+colnames(fatalities) <- c("EVTYPE", "TOTHEALTHDMG")
+
+injuries <- select(top_health_dmg, EVTYPE, INJURIES)
+colnames(injuries) <- c("EVTYPE", "TOTHEALTHDMG")
+
+# health_dmg <- rbind(fatalities, injuries)
+health_dmg = rbind(mutate(fatalities, factor = rep("FATALITIES",12)),
+                   mutate(injuries, factor = rep("INJURIES",12)))
+
+ggplot(health_dmg, aes(x = EVTYPE, y = TOTHEALTHDMG, fill = factor)) +
+    geom_bar(stat = "identity") +
+    labs(title = "Event Types that have Most Health Impact",
+         x = "Event Type", y = "Total Health Damage") +
+    theme(axis.text.x = element_text(angle = 30, hjust = 1))
+```
+
+### Types of events that have the greatest economic consequences:
+```{r }
+top_economic_dmg <- stormdf %>%
+    select(-c(FATALITIES, INJURIES, TOTHEALTHDMG)) %>%
+    mutate(TOTECONOMICDMG = TOTECONOMICDMG / 1e9) %>% # amount to billion
+    filter(TOTECONOMICDMG >= 2) %>%
+    arrange(desc(TOTECONOMICDMG))
+
+top_economic_dmg
+
+ggplot(top_economic_dmg, aes(x = EVTYPE, y = TOTECONOMICDMG)) +
+    geom_bar(stat = "identity", fill = "#7700FF") +
+    labs(title = "Event Types that have Most Economic Impact",
+         x = "Event Type", y = "Total Economic Damage (in Billion US$)") +
+    theme(axis.text.x = element_text(angle = 30, hjust = 1))
+```
+
+### Note
+This analysis was done under Peer Assesment 2 of Coursera course *Reproducible Research*.
